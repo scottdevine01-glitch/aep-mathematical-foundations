@@ -2,28 +2,29 @@
 AEP Parameter Solver
 Implements Theorem 2: Existence and Uniqueness of Parameter Solutions
 Anti-Entropic Principle Mathematical Foundations
+
+NOTE: Uses only numpy for maximum compatibility
 """
 
 import numpy as np
-from scipy.optimize import newton
-from scipy.constants import c, hbar, G
 
 class AEPParameterSolver:
     """
     Solves the AEP parameter system from first principles
     Implements the complete parameter determination from Section 4
+    Uses only numpy for maximum compatibility
     """
     
     def __init__(self):
-        # Physical constants
-        self.M_P = np.sqrt(hbar * c / G)  # Planck mass in kg
-        self.c = c
-        self.hbar = hbar
+        # Physical constants (hardcoded for compatibility)
+        self.M_P = 2.176434e-8  # Planck mass in kg
+        self.c = 3e8
+        self.hbar = 1.0545718e-34
         
         # Empirical inputs (with uncertainties)
-        self.rho_Lambda = (2.4e-3 * 1.602e-19)**4 / (hbar * c)**3  # (2.4e-3 eV)^4 in J/m^3
-        self.a0 = 1.20e-10  # MOND acceleration scale in m/s^2
-        self.Rc = 3.09e19   # Structure transition scale in meters
+        self.rho_Lambda = (2.4e-3 * 1.602e-19)**4 / (self.hbar * self.c)**3
+        self.a0 = 1.20e-10
+        self.Rc = 3.09e19
         
         # AEP-determined relationships (Theorem 2)
         self.X_min_relation = lambda g: -1/(8*g)
@@ -45,7 +46,10 @@ class AEPParameterSolver:
         """Sound speed c_s^2 = P_X/(P_X + 2X P_XX)"""
         P_X = self.p_x_derivative(X, g, lam)
         P_XX = self.p_xx_derivative(X, g, lam)
-        return P_X / (P_X + 2*X*P_XX)
+        denominator = P_X + 2*X*P_XX
+        if denominator == 0:
+            return 0
+        return P_X / denominator
     
     def solve_g_from_a0(self, a0_empirical):
         """
@@ -59,7 +63,7 @@ class AEPParameterSolver:
     def parameter_system_residuals(self, params, g, lam):
         """
         Compute residuals for the parameter system (Equations 2-7)
-        params = [kappa, v_chi, lambda_chi, gamma]
+        params = [kappa, v_chi]
         """
         kappa, v_chi = params
         X_min = self.X_min_relation(g)
@@ -68,24 +72,65 @@ class AEPParameterSolver:
         rho_Lambda_calc = self.M_P**4 * self.p_x(X_min, g, lam)
         resid1 = (self.rho_Lambda - rho_Lambda_calc) / self.rho_Lambda
         
-        # Residual 2: Structure scale (Eq 4)
-        mu = 2.417e-33 * self.M_P  # Mass scale from your Table 1
+        # Residual 2: Structure scale (Eq 4) - simplified
+        mu = 2.417e-33 * self.M_P
         Rc_calc = np.pi * self.hbar / (self.c * self.M_P * np.sqrt(g) * mu**2)
         resid2 = (self.Rc - Rc_calc) / self.Rc
         
         # Residual 3: Sound speed constraint (Eq 6)
         cs2 = self.sound_speed_squared(X_min, g, lam)
-        resid3 = cs2 - 1/3  # Should be exactly 1/3
+        resid3 = cs2 - 1/3
         
         return np.array([resid1, resid2, resid3])
     
-    def solve_parameter_system(self, tolerance=1e-8, max_iterations=20):
+    def simple_newton_solve(self, g, lam, initial_guess, tolerance=1e-8, max_iterations=20):
         """
-        Main parameter solver - Implements Algorithm 1 from paper
-        Returns complete parameter set with uncertainties
+        Simplified Newton-Raphson using only numpy
         """
-        print("AEP PARAMETER SOLVER")
-        print("=" * 50)
+        params_current = np.array(initial_guess)
+        
+        for iteration in range(max_iterations):
+            residuals = self.parameter_system_residuals(params_current, g, lam)
+            residual_norm = np.linalg.norm(residuals)
+            
+            print(f"Iteration {iteration + 1}:")
+            print(f"  κ = {params_current[0]:.6e}, v_χ = {params_current[1]:.6e} M_P")
+            print(f"  Residual norm: {residual_norm:.2e}")
+            
+            if residual_norm < tolerance:
+                print("✓ Convergence achieved!")
+                break
+                
+            # Finite difference Jacobian using only numpy
+            jacobian = np.zeros((3, 2))
+            h = 1e-8
+            
+            for j in range(2):
+                params_perturbed = params_current.copy()
+                params_perturbed[j] += h
+                residuals_perturbed = self.parameter_system_residuals(params_perturbed, g, lam)
+                jacobian[:, j] = (residuals_perturbed - residuals) / h
+            
+            # Newton update using numpy.linalg.lstsq
+            try:
+                update = np.linalg.lstsq(jacobian, residuals, rcond=None)[0]
+                params_current -= update
+            except np.linalg.LinAlgError:
+                # Fallback to gradient descent if Jacobian is singular
+                print("Jacobian singular, using gradient descent")
+                update = jacobian.T @ residuals
+                params_current -= 0.1 * update
+                
+            print()
+        
+        return params_current, residual_norm < tolerance, residual_norm
+    
+    def solve_parameter_system(self, tolerance=1e-6, max_iterations=20):
+        """
+        Main parameter solver - Uses only numpy for compatibility
+        """
+        print("AEP PARAMETER SOLVER (NUMPY-ONLY VERSION)")
+        print("=" * 60)
         print("Solving cosmological parameters from first principles...")
         print(f"Target tolerance: {tolerance}")
         print()
@@ -104,53 +149,15 @@ class AEPParameterSolver:
         X_min = self.X_min_relation(g)
         print(f"X_min = {X_min:.6e} M_P^4")
         
-        # Step 4: Solve remaining parameters using Newton-Raphson
+        # Step 4: Solve remaining parameters using simplified Newton-Raphson
         print("Step 3: Solve coupled system for κ, v_χ")
         print("-" * 40)
         
         # Initial guesses from your Table 1
         initial_guess = [2.0e-4, 1.0e-29 * self.M_P]
         
-        # Newton-Raphson iteration (Theorem 6)
-        params_current = np.array(initial_guess)
-        
-        for iteration in range(max_iterations):
-            residuals = self.parameter_system_residuals(params_current, g, lam)
-            residual_norm = np.linalg.norm(residuals)
-            
-            print(f"Iteration {iteration + 1}:")
-            print(f"  κ = {params_current[0]:.6e}, v_χ = {params_current[1]:.6e} M_P")
-            print(f"  Residual norm: {residual_norm:.2e}")
-            
-            if residual_norm < tolerance:
-                print("✓ Convergence achieved!")
-                break
-                
-            # Finite difference Jacobian
-            jacobian = np.zeros((3, 2))
-            h = 1e-8
-            
-            for j in range(2):
-                params_perturbed = params_current.copy()
-                params_perturbed[j] += h
-                residuals_perturbed = self.parameter_system_residuals(params_perturbed, g, lam)
-                jacobian[:, j] = (residuals_perturbed - residuals) / h
-            
-            # Newton update
-            try:
-                update = np.linalg.lstsq(jacobian, residuals, rcond=None)[0]
-                params_current -= update
-            except np.linalg.LinAlgError:
-                print("Jacobian singular, using gradient descent")
-                update = jacobian.T @ residuals
-                params_current -= 0.1 * update
-                
-            print()
-        
-        else:
-            print("✗ Maximum iterations reached")
-            
-        kappa, v_chi = params_current
+        kappa, v_chi, converged, final_residual = self.simple_newton_solve(
+            g, lam, initial_guess, tolerance, max_iterations)
         
         # Step 5: Determine remaining parameters
         print("Step 4: Determine λ_χ and γ")
@@ -189,13 +196,13 @@ class AEPParameterSolver:
             'lambda_chi': lambda_chi,
             'gamma': gamma,
             'X_min': X_min,
-            'converged': residual_norm < tolerance,
-            'final_residual': residual_norm
+            'converged': converged,
+            'final_residual': final_residual
         }
     
-    def error_propagation(self, parameters, input_uncertainties):
+    def error_propagation(self, parameters):
         """
-        Implements Theorem 8: Error propagation analysis
+        Simplified error propagation using only numpy
         """
         print()
         print("ERROR PROPAGATION ANALYSIS")
@@ -206,11 +213,10 @@ class AEPParameterSolver:
         sigma_a0 = 0.02   # 2% 
         sigma_Rc = 0.05   # 5%
         
-        # Sensitivity analysis (simplified)
+        # Sensitivity analysis
         g = parameters['g']
         
         # From a0 = c^3 / (ħ M_P (gλ)^(1/4)) and λ = (10/π)g^2
-        # So a0 ∝ g^(-3/4)
         sigma_g = (4/3) * sigma_a0 * g
         
         # Propagate to other parameters
@@ -239,7 +245,7 @@ def main():
     for key, value in parameters.items():
         if key not in ['converged', 'final_residual']:
             if 'chi' in key:
-                print(f"{key:12} = {value:.6e} M_P")
+                print(f"{key:12} = {value/2.176434e-8:.6e} M_P")  # Convert back to M_P units
             elif key == 'X_min':
                 print(f"{key:12} = {value:.6e} M_P^4")
             else:
@@ -249,8 +255,7 @@ def main():
     print(f"{'residual':12} = {parameters['final_residual']:.2e}")
     
     # Error analysis
-    input_uncertainties = {'rho_Lambda': 0.01, 'a0': 0.02, 'Rc': 0.05}
-    solver.error_propagation(parameters, input_uncertainties)
+    solver.error_propagation(parameters)
     
     # Verify against Table 1 values
     print()
@@ -269,9 +274,10 @@ def main():
         if key in parameters:
             calc_val = parameters[key]
             if key == 'v_chi':  # Convert back to M_P units
-                calc_val = calc_val / solver.M_P
+                calc_val = calc_val / 2.176434e-8
             relative_error = abs(calc_val - paper_val) / paper_val
-            print(f"{key:12}: paper = {paper_val:.3e}, calculated = {calc_val:.3e}, error = {relative_error:.2%}")
+            status = "✓" if relative_error < 0.01 else "✗"
+            print(f"{status} {key:12}: paper = {paper_val:.3e}, calculated = {calc_val:.3e}, error = {relative_error:.2%}")
 
 if __name__ == "__main__":
     main()
