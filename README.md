@@ -1,6 +1,3 @@
-
-
-
 ```markdown
 # Mathematical Foundations of the Anti-Entropic Principle
 
